@@ -52,6 +52,7 @@ import (
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/retrieval"
 	"github.com/prometheus/prometheus/rules"
+        "github.com/prometheus/prometheus/serviceassurance"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/storage/tsdb"
@@ -96,6 +97,7 @@ func main() {
 		queryTimeout     model.Duration
 
 		prometheusURL string
+		amqpURL       string
 
 		logLevel promlog.AllowedLevel
 	}{
@@ -129,6 +131,10 @@ func main() {
 	a.Flag("web.external-url",
 		"The URL under which Prometheus is externally reachable (for example, if Prometheus is served via a reverse proxy). Used for generating relative and absolute links back to Prometheus itself. If the URL has a path portion, it will be used to prefix all HTTP endpoints served by Prometheus. If omitted, relevant URL components will be derived automatically.").
 		PlaceHolder("<URL>").StringVar(&cfg.prometheusURL)
+
+	a.Flag("sa.amqp-url",
+		"AMQP URL to listen").
+		PlaceHolder("<URL>").StringVar(&cfg.amqpURL)
 
 	a.Flag("web.route-prefix",
 		"Prefix for the internal routes of web endpoints. Defaults to path of --web.external-url.").
@@ -195,6 +201,10 @@ func main() {
 		os.Exit(2)
 	}
 
+	if cfg.amqpURL == "" {
+		cfg.amqpURL = "amqp://localhost:5672/foo"
+	}
+
 	cfg.web.ReadTimeout = time.Duration(cfg.webTimeout)
 	// Default -web.route-prefix to path of -web.external-url.
 	if cfg.web.RoutePrefix == "" {
@@ -224,8 +234,8 @@ func main() {
 
 	level.Info(logger).Log("msg", "Starting Prometheus", "version", version.Info())
 	level.Info(logger).Log("build_context", version.BuildContext())
-	level.Info(logger).Log("host_details", Uname())
-	level.Info(logger).Log("fd_limits", FdLimits())
+	//level.Info(logger).Log("host_details", Uname())
+	//level.Info(logger).Log("fd_limits", FdLimits())
 
 	var (
 		localStorage  = &tsdb.ReadyStorage{}
@@ -252,6 +262,8 @@ func main() {
 			Registerer:  prometheus.DefaultRegisterer,
 			Logger:      log.With(logger, "component", "rule manager"),
 		})
+		saMgr                  = serviceassurance.NewServiceAssuranceManager(log.With(logger,
+							"component", "service assurance manager"), cfg.amqpURL, fanoutStorage)
 	)
 
 	cfg.web.Context = ctxWeb
@@ -489,6 +501,20 @@ func main() {
 			},
 			func(err error) {
 				close(cancel)
+			},
+		)
+	}
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		g.Add(
+			func() error {
+				err := saMgr.Run(ctx)
+				level.Info(logger).Log("msg", "Service Assurance Manager stopped")
+				return err
+			},
+			func(err error) {
+				level.Info(logger).Log("msg", "Stopping Service Assurance Manager")
+				cancel()
 			},
 		)
 	}
