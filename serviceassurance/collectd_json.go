@@ -4,7 +4,6 @@ import (
         "encoding/json"
 	"github.com/prometheus/prometheus/pkg/labels"
         "strconv"
-	"reflect"
 )
 
 // Collectd  ...
@@ -24,23 +23,30 @@ type Collectd struct {
 func (c *Collectd) primLabels () labels.Labels {
 	lbls := make([]labels.Label, 0, 20)
 
-	t := reflect.TypeOf(*c)
-	v := reflect.ValueOf(*c)
-
-	for i := 4; i< t.NumField(); i++ {
-		switch v.Field(i).Kind() {
-		case reflect.Float64:
-			lbls = append(lbls, labels.Label{
-				Name: t.Field(i).Name,
-				Value: strconv.FormatFloat(v.Field(i).Float(),'f', 4, 64),
-			})
-		case reflect.String:
-			lbls = append(lbls, labels.Label{
-				Name: t.Field(i).Name,
-				Value: v.Field(i).String(),
-			})
-		}
-	}
+	lbls = append(lbls, labels.Label{
+		Name: "Interval",
+		Value: strconv.FormatFloat(c.Interval, 'f', 4, 64),
+	})
+	lbls = append(lbls, labels.Label{
+		Name: "Host",
+		Value: c.Host,
+	})
+	lbls = append(lbls, labels.Label{
+		Name: "Plugin",
+		Value: c.Plugin,
+	})
+	lbls = append(lbls, labels.Label{
+		Name: "PluginInstance",
+		Value: c.PluginInstance,
+	})
+	lbls = append(lbls, labels.Label{
+		Name: "Type",
+		Value: c.Type,
+	})
+	lbls = append(lbls, labels.Label{
+		Name: "TypeInstance",
+		Value: c.TypeInstance,
+	})
 	return lbls
 }
 
