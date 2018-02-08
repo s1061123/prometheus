@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-kit/kit/log"
         "github.com/prometheus/prometheus/storage"
+	"reflect"
+	"time"
 
 	"qpid.apache.org/amqp"
 	"qpid.apache.org/electron"
@@ -34,10 +36,10 @@ type ServiceAssuranceManger struct {
 	prefetch int
 }
 
-func NewServiceAssuranceManager (logger log.Logger, amqpurl string, app Appendable) *ServiceAssuranceManger {
+func NewServiceAssuranceManager (logger log.Logger, amqpurl string, app Appendable, prefetchNum int) *ServiceAssuranceManger {
 	return &ServiceAssuranceManger{
 		amqpUrl: amqpurl,
-		prefetch: 10,
+		prefetch: prefetchNum,
 		append: app,
 		logger: logger,
 		graceConShut: make(chan struct{}),
@@ -90,10 +92,13 @@ func (m *ServiceAssuranceManger) ListenAMQP () error {
 
 
 	var wait sync.WaitGroup
+	countRecv := 0
+	lastCounted := time.Now()
 	for {
 		select {
 		case mes := <-m.messages:
 			if sbody, ok := mes.Body().(amqp.Binary); ok {
+				countRecv = countRecv + 1
 				sbodystr := sbody.String()
 				wait.Add(1)
 				go func (mesg string) {
@@ -116,7 +121,7 @@ func (m *ServiceAssuranceManger) ListenAMQP () error {
 						tval := elem.GetTime()
 						for i := 0; i < len(elem.Values); i++ {
 						//	fmt.Printf("lablel: %v, t: %v, vals: %v\n", lbls[i], tval, elem.Values[i])
-							fmt.Printf(".")
+						//	fmt.Printf(".")
 							app.Add(lbls[i], tval, elem.Values[i])
 						}
 						if err := app.Commit(); err != nil {
@@ -126,7 +131,14 @@ func (m *ServiceAssuranceManger) ListenAMQP () error {
 					}
 				}(sbodystr)
 			} else {
-				fmt.Fprintf(os.Stderr, "Format error: n") //XXX: need logging
+				t := reflect.TypeOf(mes.Body())
+				fmt.Fprintf(os.Stderr, "Format error: %v", t) //XXX: need logging
+			}
+			if countRecv % 1000 == 0 {
+				duration := time.Now().Sub(lastCounted)
+				fmt.Printf("Recv: %d received (duration: %v, mesg/sec: %v)\n",
+						countRecv, duration, float64(1000)/duration.Seconds())
+				lastCounted = time.Now()
 			}
 		case <-m.ctx.Done():
 			m.connection.Close(nil)

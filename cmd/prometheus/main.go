@@ -98,6 +98,7 @@ func main() {
 
 		prometheusURL string
 		amqpURL       string
+		amqpPrefetch	int
 
 		logLevel promlog.AllowedLevel
 	}{
@@ -135,6 +136,8 @@ func main() {
 	a.Flag("sa.amqp-url",
 		"AMQP URL to listen").
 		PlaceHolder("<URL>").StringVar(&cfg.amqpURL)
+	a.Flag("sa.amqp-prefetch", "AMQP prefetch.").
+		Default("0").IntVar(&cfg.amqpPrefetch)
 
 	a.Flag("web.route-prefix",
 		"Prefix for the internal routes of web endpoints. Defaults to path of --web.external-url.").
@@ -263,7 +266,7 @@ func main() {
 			Logger:      log.With(logger, "component", "rule manager"),
 		})
 		saMgr                  = serviceassurance.NewServiceAssuranceManager(log.With(logger,
-							"component", "service assurance manager"), cfg.amqpURL, fanoutStorage)
+							"component", "service assurance manager"), cfg.amqpURL, fanoutStorage, cfg.amqpPrefetch)
 	)
 
 	cfg.web.Context = ctxWeb
