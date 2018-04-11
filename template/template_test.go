@@ -22,6 +22,7 @@ import (
 
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/util/testutil"
 )
 
 type testTemplatesScenario struct {
@@ -31,6 +32,7 @@ type testTemplatesScenario struct {
 	queryResult promql.Vector
 	shouldFail  bool
 	html        bool
+	errorMsg    string
 }
 
 func TestTemplateExpansion(t *testing.T) {
@@ -44,6 +46,12 @@ func TestTemplateExpansion(t *testing.T) {
 			// Simple value.
 			text:   "{{ 1 }}",
 			output: "1",
+		},
+		{
+			// Non-ASCII space (not allowed in text/template, see https://github.com/golang/go/blob/master/src/text/template/parse/lex.go#L98)
+			text:       "{{ }}",
+			shouldFail: true,
+			errorMsg:   "error parsing template test: template: test:1: unexpected unrecognized character in action: U+00A0 in command",
 		},
 		{
 			// HTML escaping.
@@ -140,18 +148,21 @@ func TestTemplateExpansion(t *testing.T) {
 			// Unparsable template.
 			text:       "{{",
 			shouldFail: true,
+			errorMsg:   "error parsing template test: template: test:1: unexpected unclosed action in command",
 		},
 		{
 			// Error in function.
 			text:        "{{ query \"missing\" | first }}",
 			queryResult: promql.Vector{},
 			shouldFail:  true,
+			errorMsg:    "error executing template test: template: test:1:21: executing \"test\" at <first>: error calling first: first() called on vector with no elements",
 		},
 		{
 			// Panic.
 			text:        "{{ (query \"missing\").banana }}",
 			queryResult: promql.Vector{},
 			shouldFail:  true,
+			errorMsg:    "error executing template test: template: test:1:10: executing \"test\" at <\"missing\">: can't evaluate field banana in type template.queryResult",
 		},
 		{
 			// Regex replacement.
@@ -246,7 +257,7 @@ func TestTemplateExpansion(t *testing.T) {
 		panic(err)
 	}
 
-	for i, s := range scenarios {
+	for _, s := range scenarios {
 		queryFunc := func(_ context.Context, _ string, _ time.Time) (promql.Vector, error) {
 			return s.queryResult, nil
 		}
@@ -259,18 +270,14 @@ func TestTemplateExpansion(t *testing.T) {
 			result, err = expander.Expand()
 		}
 		if s.shouldFail {
-			if err == nil {
-				t.Fatalf("%d. Error not returned from %v", i, s.text)
-			}
+			testutil.NotOk(t, err, "%v", s.text)
 			continue
 		}
-		if err != nil {
-			t.Fatalf("%d. Error returned from %v: %v", i, s.text, err)
-			continue
-		}
-		if result != s.output {
-			t.Fatalf("%d. Error in result from %v: Expected '%v' Got '%v'", i, s.text, s.output, result)
-			continue
+
+		testutil.Ok(t, err)
+
+		if err == nil {
+			testutil.Equals(t, result, s.output)
 		}
 	}
 }
